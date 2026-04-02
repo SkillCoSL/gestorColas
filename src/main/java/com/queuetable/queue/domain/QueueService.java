@@ -9,6 +9,7 @@ import com.queuetable.shared.exception.BadRequestException;
 import com.queuetable.shared.exception.ForbiddenException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
+import com.queuetable.shared.websocket.EventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,13 +22,16 @@ public class QueueService {
     private final QueueEntryRepository queueEntryRepository;
     private final RestaurantRepository restaurantRepository;
     private final RestaurantConfigRepository configRepository;
+    private final EventPublisher eventPublisher;
 
     public QueueService(QueueEntryRepository queueEntryRepository,
                         RestaurantRepository restaurantRepository,
-                        RestaurantConfigRepository configRepository) {
+                        RestaurantConfigRepository configRepository,
+                        EventPublisher eventPublisher) {
         this.queueEntryRepository = queueEntryRepository;
         this.restaurantRepository = restaurantRepository;
         this.configRepository = configRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -74,6 +78,8 @@ public class QueueService {
         entry.setEstimatedWaitMinutes(estimatedWait);
 
         entry = queueEntryRepository.save(entry);
+
+        eventPublisher.publishQueueUpdated(restaurant.getId(), QueueEntryResponse.from(entry));
 
         return new JoinQueueResponse(
                 entry.getId(),
@@ -136,6 +142,7 @@ public class QueueService {
         entry.setStatus(QueueEntryStatus.CANCELLED);
         queueEntryRepository.save(entry);
         recalculatePositions(entry.getRestaurantId());
+        eventPublisher.publishQueueUpdated(entry.getRestaurantId(), QueueEntryResponse.from(entry));
     }
 
     private void recalculatePositions(UUID restaurantId) {

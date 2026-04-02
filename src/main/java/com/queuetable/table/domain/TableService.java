@@ -3,7 +3,9 @@ package com.queuetable.table.domain;
 import com.queuetable.shared.exception.BadRequestException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
+import com.queuetable.shared.websocket.EventPublisher;
 import com.queuetable.table.dto.CreateTableRequest;
+import com.queuetable.table.dto.TableResponse;
 import com.queuetable.table.dto.UpdateTableRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,9 +17,11 @@ import java.util.UUID;
 public class TableService {
 
     private final TableRepository tableRepository;
+    private final EventPublisher eventPublisher;
 
-    public TableService(TableRepository tableRepository) {
+    public TableService(TableRepository tableRepository, EventPublisher eventPublisher) {
         this.tableRepository = tableRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -68,7 +72,9 @@ public class TableService {
         }
 
         table.setStatus(newStatus);
-        return tableRepository.save(table);
+        RestaurantTable saved = tableRepository.save(table);
+        eventPublisher.publishTableUpdated(saved.getRestaurantId(), TableResponse.from(saved));
+        return saved;
     }
 
     @Transactional
