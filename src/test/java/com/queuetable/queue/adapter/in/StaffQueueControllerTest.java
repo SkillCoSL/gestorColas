@@ -3,7 +3,9 @@ package com.queuetable.queue.adapter.in;
 import com.jayway.jsonpath.JsonPath;
 import com.queuetable.auth.dto.AuthResponse;
 import com.queuetable.queue.dto.JoinQueueRequest;
+import com.queuetable.queue.dto.SeatQueueEntryRequest;
 import com.queuetable.shared.AbstractIntegrationTest;
+import com.queuetable.table.dto.CreateTableRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
@@ -151,5 +153,172 @@ class StaffQueueControllerTest extends AbstractIntegrationTest {
                         auth.restaurantId(), UUID.randomUUID())
                         .header("Authorization", bearer(auth)))
                 .andExpect(status().isNotFound());
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /restaurants/{id}/queue (walk-in)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void addWalkIn_success() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        var request = new JoinQueueRequest("Walk In Person", 3, "555-0000");
+
+        mockMvc.perform(post("/restaurants/{id}/queue", auth.restaurantId())
+                        .header("Authorization", bearer(auth))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.customerName").value("Walk In Person"))
+                .andExpect(jsonPath("$.partySize").value(3))
+                .andExpect(jsonPath("$.walkIn").value(true))
+                .andExpect(jsonPath("$.status").value("WAITING"));
+    }
+
+    @Test
+    void addWalkIn_otherRestaurant_returns403() throws Exception {
+        AuthResponse owner = freshRestaurant();
+        AuthResponse intruder = freshRestaurant();
+        var request = new JoinQueueRequest("Sneaky", 2, null);
+
+        mockMvc.perform(post("/restaurants/{id}/queue", owner.restaurantId())
+                        .header("Authorization", bearer(intruder))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /restaurants/{id}/queue/{entryId}/seat
+    // -------------------------------------------------------------------------
+
+    private String createTable(AuthResponse auth, String label, int capacity) throws Exception {
+        var request = new CreateTableRequest(label, capacity, null);
+        MvcResult result = mockMvc.perform(post("/restaurants/{id}/tables", auth.restaurantId())
+                        .header("Authorization", bearer(auth))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return JsonPath.read(result.getResponse().getContentAsString(), "$.id");
+    }
+
+    @Test
+    void seatEntry_success() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+        String tableId = createTable(auth, "Mesa S1", 4);
+
+        MvcResult joinResult = joinQueue(slug, "Seatee", 2);
+        String entryId = JsonPath.read(joinResult.getResponse().getContentAsString(), "$.entryId");
+
+        var seatReq = new SeatQueueEntryRequest(UUID.fromString(tableId));
+        mockMvc.perform(post("/restaurants/{rid}/queue/{eid}/seat", auth.restaurantId(), entryId)
+                        .header("Authorization", bearer(auth))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(seatReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SEATED"));
+
+        // Verify table is now OCCUPIED
+        mockMvc.perform(get("/restaurants/{id}/tables", auth.restaurantId())
+                        .header("Authorization", bearer(auth)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("OCCUPIED"));
+    }
+
+    @Test
+    void seatEntry_tableTooSmall_returns400() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+        String tableId = createTable(auth, "Mesa Tiny", 2);
+
+        MvcResult joinResult = joinQueue(slug, "Big Group", 6);
+        String entryId = JsonPath.read(joinResult.getResponse().getContentAsString(), "$.entryId");
+
+        var seatReq = new SeatQueueEntryRequest(UUID.fromString(tableId));
+        mockMvc.perform(post("/restaurants/{rid}/queue/{eid}/seat", auth.restaurantId(), entryId)
+                        .header("Authorization", bearer(auth))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(seatReq)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void seatEntry_tableNotFree_returns400() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+        String tableId = createTable(auth, "Mesa Busy", 4);
+
+        // Seat first person
+        MvcResult r1 = joinQueue(slug, "First", 2);
+        String entryId1 = JsonPath.read(r1.getResponse().getContentAsString(), "$.entryId");
+        var seatReq = new SeatQueueEntryRequest(UUID.fromString(tableId));
+        mockMvc.perform(post("/restaurants/{rid}/queue/{eid}/seat", auth.restaurantId(), entryId1)
+                        .header("Authorization", bearer(auth))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(seatReq)))
+                .andExpect(status().isOk());
+
+        // Try to seat second at same table
+        MvcResult r2 = joinQueue(slug, "Second", 2);
+        String entryId2 = JsonPath.read(r2.getResponse().getContentAsString(), "$.entryId");
+        mockMvc.perform(post("/restaurants/{rid}/queue/{eid}/seat", auth.restaurantId(), entryId2)
+                        .header("Authorization", bearer(auth))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(seatReq)))
+                .andExpect(status().isBadRequest());
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /restaurants/{id}/tables/available
+    // -------------------------------------------------------------------------
+
+    @Test
+    void getAvailableTables_filtersCorrectly() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        createTable(auth, "Small", 2);
+        createTable(auth, "Big", 6);
+
+        // For group of 4, only Big should be available
+        mockMvc.perform(get("/restaurants/{id}/tables/available", auth.restaurantId())
+                        .header("Authorization", bearer(auth))
+                        .param("groupSize", "4"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].label").value("Big"));
+
+        // For group of 2, both available
+        mockMvc.perform(get("/restaurants/{id}/tables/available", auth.restaurantId())
+                        .header("Authorization", bearer(auth))
+                        .param("groupSize", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    @Test
+    void getAvailableTables_excludesOccupied() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+        String tableId = createTable(auth, "Occupied", 4);
+        createTable(auth, "Free", 4);
+
+        // Seat someone at first table
+        MvcResult r = joinQueue(slug, "Seated", 2);
+        String entryId = JsonPath.read(r.getResponse().getContentAsString(), "$.entryId");
+        var seatReq = new SeatQueueEntryRequest(UUID.fromString(tableId));
+        mockMvc.perform(post("/restaurants/{rid}/queue/{eid}/seat", auth.restaurantId(), entryId)
+                        .header("Authorization", bearer(auth))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(seatReq)))
+                .andExpect(status().isOk());
+
+        // Only Free table should be available
+        mockMvc.perform(get("/restaurants/{id}/tables/available", auth.restaurantId())
+                        .header("Authorization", bearer(auth))
+                        .param("groupSize", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].label").value("Free"));
     }
 }

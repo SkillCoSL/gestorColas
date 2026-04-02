@@ -1,5 +1,10 @@
 package com.queuetable.table.domain;
 
+import com.queuetable.config.domain.RestaurantConfig;
+import com.queuetable.config.domain.RestaurantConfigRepository;
+import com.queuetable.reservation.domain.Reservation;
+import com.queuetable.reservation.domain.ReservationRepository;
+import com.queuetable.reservation.domain.ReservationStatus;
 import com.queuetable.shared.exception.BadRequestException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
@@ -10,24 +15,70 @@ import com.queuetable.table.dto.UpdateTableRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class TableService {
 
     private final TableRepository tableRepository;
+    private final ReservationRepository reservationRepository;
+    private final RestaurantConfigRepository configRepository;
     private final EventPublisher eventPublisher;
 
-    public TableService(TableRepository tableRepository, EventPublisher eventPublisher) {
+    public TableService(TableRepository tableRepository,
+                        ReservationRepository reservationRepository,
+                        RestaurantConfigRepository configRepository,
+                        EventPublisher eventPublisher) {
         this.tableRepository = tableRepository;
+        this.reservationRepository = reservationRepository;
+        this.configRepository = configRepository;
         this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
-    public List<RestaurantTable> listByRestaurant(UUID restaurantId) {
+    public List<TableResponse> listByRestaurant(UUID restaurantId) {
         SecurityContextUtil.validateRestaurantOwnership(restaurantId);
-        return tableRepository.findByRestaurantIdOrderByLabelAsc(restaurantId);
+        List<RestaurantTable> tables = tableRepository.findByRestaurantIdOrderByLabelAsc(restaurantId);
+        Set<UUID> reservedSoonTableIds = getReservedSoonTableIds(restaurantId);
+        return tables.stream()
+                .map(t -> TableResponse.from(t, reservedSoonTableIds.contains(t.getId())))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<TableResponse> getAvailableTables(UUID restaurantId, int groupSize) {
+        SecurityContextUtil.validateRestaurantOwnership(restaurantId);
+        List<RestaurantTable> tables = tableRepository.findByRestaurantIdOrderByLabelAsc(restaurantId);
+        Set<UUID> reservedSoonTableIds = getReservedSoonTableIds(restaurantId);
+
+        return tables.stream()
+                .filter(t -> t.getStatus() == TableStatus.FREE)
+                .filter(t -> t.getCapacity() >= groupSize)
+                .filter(t -> !reservedSoonTableIds.contains(t.getId()))
+                .map(t -> TableResponse.from(t, false))
+                .toList();
+    }
+
+    private Set<UUID> getReservedSoonTableIds(UUID restaurantId) {
+        RestaurantConfig config = configRepository.findByRestaurantId(restaurantId).orElse(null);
+        if (config == null) return Set.of();
+
+        Instant now = Instant.now();
+        Instant windowEnd = now.plus(config.getReservationProtectionWindowMinutes(), ChronoUnit.MINUTES);
+
+        List<Reservation> upcoming = reservationRepository
+                .findByRestaurantIdAndStatusAndReservedAtBetweenOrderByReservedAtAsc(
+                        restaurantId, ReservationStatus.BOOKED, now, windowEnd);
+
+        return upcoming.stream()
+                .map(Reservation::getTableId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
     }
 
     @Transactional

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -30,10 +31,14 @@ public class TableController {
 
     @GetMapping("/restaurants/{restaurantId}/tables")
     public ResponseEntity<List<TableResponse>> list(@PathVariable UUID restaurantId) {
-        var tables = tableService.listByRestaurant(restaurantId).stream()
-                .map(TableResponse::from)
-                .toList();
-        return ResponseEntity.ok(tables);
+        return ResponseEntity.ok(tableService.listByRestaurant(restaurantId));
+    }
+
+    @GetMapping("/restaurants/{restaurantId}/tables/available")
+    public ResponseEntity<List<TableResponse>> available(
+            @PathVariable UUID restaurantId,
+            @RequestParam int groupSize) {
+        return ResponseEntity.ok(tableService.getAvailableTables(restaurantId, groupSize));
     }
 
     @PostMapping("/restaurants/{restaurantId}/tables")

@@ -10,6 +10,10 @@ import com.queuetable.shared.exception.ForbiddenException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
 import com.queuetable.shared.websocket.EventPublisher;
+import com.queuetable.table.domain.RestaurantTable;
+import com.queuetable.table.domain.TableRepository;
+import com.queuetable.table.domain.TableStatus;
+import com.queuetable.table.dto.TableResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,16 +26,22 @@ public class QueueService {
     private final QueueEntryRepository queueEntryRepository;
     private final RestaurantRepository restaurantRepository;
     private final RestaurantConfigRepository configRepository;
+    private final TableRepository tableRepository;
     private final EventPublisher eventPublisher;
+    private final QueueSseService queueSseService;
 
     public QueueService(QueueEntryRepository queueEntryRepository,
                         RestaurantRepository restaurantRepository,
                         RestaurantConfigRepository configRepository,
-                        EventPublisher eventPublisher) {
+                        TableRepository tableRepository,
+                        EventPublisher eventPublisher,
+                        QueueSseService queueSseService) {
         this.queueEntryRepository = queueEntryRepository;
         this.restaurantRepository = restaurantRepository;
         this.configRepository = configRepository;
+        this.tableRepository = tableRepository;
         this.eventPublisher = eventPublisher;
+        this.queueSseService = queueSseService;
     }
 
     @Transactional(readOnly = true)
@@ -134,6 +144,67 @@ public class QueueService {
         cancelEntry(entry);
     }
 
+    @Transactional
+    public QueueEntryResponse seatEntry(UUID restaurantId, UUID entryId, UUID tableId) {
+        SecurityContextUtil.validateRestaurantOwnership(restaurantId);
+
+        QueueEntry entry = queueEntryRepository.findById(entryId)
+                .orElseThrow(() -> new ResourceNotFoundException("QueueEntry", entryId));
+        if (!entry.getRestaurantId().equals(restaurantId)) {
+            throw new ForbiddenException("Entry does not belong to this restaurant");
+        }
+        if (!entry.getStatus().canTransitionTo(QueueEntryStatus.SEATED)) {
+            throw new BadRequestException("Cannot seat entry with status: " + entry.getStatus());
+        }
+
+        RestaurantTable table = tableRepository.findById(tableId)
+                .orElseThrow(() -> new ResourceNotFoundException("Table", tableId));
+        if (!table.getRestaurantId().equals(restaurantId)) {
+            throw new ForbiddenException("Table does not belong to this restaurant");
+        }
+        if (table.getStatus() != TableStatus.FREE) {
+            throw new BadRequestException("Table is not free, current status: " + table.getStatus());
+        }
+        if (table.getCapacity() < entry.getPartySize()) {
+            throw new BadRequestException(
+                    "Table capacity (" + table.getCapacity() + ") is less than party size (" + entry.getPartySize() + ")");
+        }
+
+        entry.setStatus(QueueEntryStatus.SEATED);
+        entry.setTableId(table.getId());
+        table.setStatus(TableStatus.OCCUPIED);
+
+        tableRepository.save(table);
+        QueueEntry saved = queueEntryRepository.save(entry);
+        recalculatePositions(restaurantId);
+
+        eventPublisher.publishQueueUpdated(restaurantId, QueueEntryResponse.from(saved));
+        eventPublisher.publishTableUpdated(restaurantId, TableResponse.from(table));
+        queueSseService.notifyEntry(saved.getId(), PublicQueueEntryResponse.from(saved));
+
+        return QueueEntryResponse.from(saved);
+    }
+
+    @Transactional
+    public QueueEntryResponse addWalkIn(UUID restaurantId, JoinQueueRequest request) {
+        SecurityContextUtil.validateRestaurantOwnership(restaurantId);
+        RestaurantConfig config = getConfig(restaurantId);
+
+        int waitingCount = queueEntryRepository.countWaiting(restaurantId);
+        int nextPosition = queueEntryRepository.findMaxPosition(restaurantId) + 1;
+
+        QueueEntry entry = new QueueEntry(restaurantId, request.customerName(), request.partySize(), nextPosition);
+        entry.setWalkIn(true);
+        if (request.customerPhone() != null) {
+            entry.setCustomerPhone(request.customerPhone());
+        }
+        entry.setEstimatedWaitMinutes(waitingCount * config.getAvgTableDurationMinutes());
+
+        entry = queueEntryRepository.save(entry);
+        eventPublisher.publishQueueUpdated(restaurantId, QueueEntryResponse.from(entry));
+        return QueueEntryResponse.from(entry);
+    }
+
     private void cancelEntry(QueueEntry entry) {
         if (!entry.getStatus().canTransitionTo(QueueEntryStatus.CANCELLED)) {
             throw new BadRequestException(
@@ -143,6 +214,7 @@ public class QueueService {
         queueEntryRepository.save(entry);
         recalculatePositions(entry.getRestaurantId());
         eventPublisher.publishQueueUpdated(entry.getRestaurantId(), QueueEntryResponse.from(entry));
+        queueSseService.notifyEntry(entry.getId(), PublicQueueEntryResponse.from(entry));
     }
 
     private void recalculatePositions(UUID restaurantId) {
@@ -157,6 +229,7 @@ public class QueueService {
             pos++;
         }
         queueEntryRepository.saveAll(activeEntries);
+        queueSseService.notifyRestaurantQueue(restaurantId);
     }
 
     private void recalculateEntryPosition(QueueEntry entry) {

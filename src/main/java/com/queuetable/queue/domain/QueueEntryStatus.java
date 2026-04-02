@@ -11,7 +11,7 @@ public enum QueueEntryStatus {
     EXPIRED;
 
     private static final Map<QueueEntryStatus, Set<QueueEntryStatus>> VALID_TRANSITIONS = Map.of(
-            WAITING, Set.of(NOTIFIED, CANCELLED),
+            WAITING, Set.of(NOTIFIED, SEATED, CANCELLED),
             NOTIFIED, Set.of(SEATED, EXPIRED, CANCELLED)
     );
 
