@@ -90,6 +90,15 @@ public class ReservationController {
         return ResponseEntity.ok(reservationService.markNoShow(id));
     }
 
+    @PostMapping("/reservations/{id}/complete")
+    @Operation(summary = "Completar reserva y liberar mesa", description = "SEATED → COMPLETED. La mesa pasa a CLEANING.")
+    @ApiResponse(responseCode = "200", description = "Reserva completada")
+    @ApiResponse(responseCode = "400", description = "Reserva no esta en estado SEATED")
+    @ApiResponse(responseCode = "404", description = "Reserva no encontrada")
+    public ResponseEntity<ReservationResponse> complete(@PathVariable UUID id) {
+        return ResponseEntity.ok(reservationService.complete(id));
+    }
+
     @PostMapping("/reservations/{id}/cancel")
     @Operation(summary = "Cancelar una reserva")
     @ApiResponse(responseCode = "200", description = "Reserva cancelada")

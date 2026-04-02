@@ -156,6 +156,27 @@ public class ReservationService {
     }
 
     @Transactional
+    public ReservationResponse complete(UUID reservationId) {
+        Reservation reservation = findAndValidateOwnership(reservationId);
+        transition(reservation, ReservationStatus.COMPLETED);
+
+        // Release table → CLEANING
+        if (reservation.getTableId() != null) {
+            RestaurantTable table = tableRepository.findById(reservation.getTableId())
+                    .orElse(null);
+            if (table != null && table.getStatus() == TableStatus.OCCUPIED) {
+                table.setStatus(TableStatus.CLEANING);
+                tableRepository.save(table);
+                eventPublisher.publishTableUpdated(reservation.getRestaurantId(), TableResponse.from(table));
+            }
+        }
+
+        ReservationResponse response = saveAndPublish(reservation);
+        applicationEventPublisher.publishEvent(new QueueRecalculationEvent(reservation.getRestaurantId()));
+        return response;
+    }
+
+    @Transactional
     public ReservationResponse cancel(UUID reservationId) {
         Reservation reservation = findAndValidateOwnership(reservationId);
         transition(reservation, ReservationStatus.CANCELLED);
