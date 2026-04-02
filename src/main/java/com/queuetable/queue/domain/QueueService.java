@@ -5,11 +5,13 @@ import com.queuetable.config.domain.RestaurantConfigRepository;
 import com.queuetable.queue.dto.*;
 import com.queuetable.restaurant.domain.Restaurant;
 import com.queuetable.restaurant.domain.RestaurantRepository;
+import com.queuetable.shared.event.QueueRecalculationEvent;
 import com.queuetable.shared.exception.BadRequestException;
 import com.queuetable.shared.exception.ForbiddenException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
 import com.queuetable.shared.websocket.EventPublisher;
+import org.springframework.context.event.EventListener;
 import com.queuetable.table.domain.RestaurantTable;
 import com.queuetable.table.domain.TableRepository;
 import com.queuetable.table.domain.TableStatus;
@@ -17,6 +19,7 @@ import com.queuetable.table.dto.TableResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -133,14 +136,7 @@ public class QueueService {
     @Transactional
     public void cancelEntryByStaff(UUID restaurantId, UUID entryId) {
         SecurityContextUtil.validateRestaurantOwnership(restaurantId);
-
-        QueueEntry entry = queueEntryRepository.findById(entryId)
-                .orElseThrow(() -> new ResourceNotFoundException("QueueEntry", entryId));
-
-        if (!entry.getRestaurantId().equals(restaurantId)) {
-            throw new ForbiddenException("Entry does not belong to this restaurant");
-        }
-
+        QueueEntry entry = findStaffEntry(restaurantId, entryId);
         cancelEntry(entry);
     }
 
@@ -148,11 +144,7 @@ public class QueueService {
     public QueueEntryResponse seatEntry(UUID restaurantId, UUID entryId, UUID tableId) {
         SecurityContextUtil.validateRestaurantOwnership(restaurantId);
 
-        QueueEntry entry = queueEntryRepository.findById(entryId)
-                .orElseThrow(() -> new ResourceNotFoundException("QueueEntry", entryId));
-        if (!entry.getRestaurantId().equals(restaurantId)) {
-            throw new ForbiddenException("Entry does not belong to this restaurant");
-        }
+        QueueEntry entry = findStaffEntry(restaurantId, entryId);
         if (!entry.getStatus().canTransitionTo(QueueEntryStatus.SEATED)) {
             throw new BadRequestException("Cannot seat entry with status: " + entry.getStatus());
         }
@@ -203,6 +195,79 @@ public class QueueService {
         entry = queueEntryRepository.save(entry);
         eventPublisher.publishQueueUpdated(restaurantId, QueueEntryResponse.from(entry));
         return QueueEntryResponse.from(entry);
+    }
+
+    @Transactional
+    public QueueEntryResponse notifyEntry(UUID restaurantId, UUID entryId) {
+        SecurityContextUtil.validateRestaurantOwnership(restaurantId);
+
+        QueueEntry entry = findStaffEntry(restaurantId, entryId);
+        if (!entry.getStatus().canTransitionTo(QueueEntryStatus.NOTIFIED)) {
+            throw new BadRequestException("Cannot notify entry with status: " + entry.getStatus());
+        }
+
+        entry.setStatus(QueueEntryStatus.NOTIFIED);
+        entry.setNotifiedAt(Instant.now());
+        QueueEntry saved = queueEntryRepository.save(entry);
+
+        eventPublisher.publishQueueUpdated(restaurantId, QueueEntryResponse.from(saved));
+        queueSseService.notifyEntry(saved.getId(), PublicQueueEntryResponse.from(saved));
+
+        return QueueEntryResponse.from(saved);
+    }
+
+    @Transactional
+    public PublicQueueEntryResponse confirmEntry(UUID entryId, UUID accessToken) {
+        QueueEntry entry = findByIdAndToken(entryId, accessToken);
+
+        if (entry.getStatus() != QueueEntryStatus.NOTIFIED) {
+            throw new BadRequestException("Can only confirm entries in NOTIFIED status");
+        }
+
+        // notifiedAt is already set; confirmation is implicit acknowledgment
+        // Entry stays NOTIFIED until staff seats them
+        // We publish the event so the staff panel sees the confirmation
+        eventPublisher.publishQueueUpdated(entry.getRestaurantId(), QueueEntryResponse.from(entry));
+        return PublicQueueEntryResponse.from(entry);
+    }
+
+    @Transactional
+    public QueueEntryResponse skipEntry(UUID restaurantId, UUID entryId) {
+        SecurityContextUtil.validateRestaurantOwnership(restaurantId);
+
+        QueueEntry entry = findStaffEntry(restaurantId, entryId);
+        if (!entry.getStatus().isActive()) {
+            throw new BadRequestException("Cannot skip entry with status: " + entry.getStatus());
+        }
+
+        // Move to end of queue
+        int maxPosition = queueEntryRepository.findMaxPosition(restaurantId);
+        entry.setPosition(maxPosition + 1);
+        entry.setStatus(QueueEntryStatus.WAITING);
+        entry.setNotifiedAt(null);
+
+        QueueEntry saved = queueEntryRepository.save(entry);
+        recalculatePositions(restaurantId);
+
+        eventPublisher.publishQueueUpdated(restaurantId, QueueEntryResponse.from(saved));
+        queueSseService.notifyEntry(saved.getId(), PublicQueueEntryResponse.from(saved));
+
+        return QueueEntryResponse.from(saved);
+    }
+
+    @EventListener
+    @Transactional
+    public void onQueueRecalculation(QueueRecalculationEvent event) {
+        recalculatePositions(event.restaurantId());
+    }
+
+    private QueueEntry findStaffEntry(UUID restaurantId, UUID entryId) {
+        QueueEntry entry = queueEntryRepository.findById(entryId)
+                .orElseThrow(() -> new ResourceNotFoundException("QueueEntry", entryId));
+        if (!entry.getRestaurantId().equals(restaurantId)) {
+            throw new ForbiddenException("Entry does not belong to this restaurant");
+        }
+        return entry;
     }
 
     private void cancelEntry(QueueEntry entry) {

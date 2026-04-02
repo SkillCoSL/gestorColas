@@ -4,11 +4,13 @@ import com.queuetable.reservation.dto.CreateReservationRequest;
 import com.queuetable.reservation.dto.ReservationResponse;
 import com.queuetable.reservation.dto.SeatReservationRequest;
 import com.queuetable.reservation.dto.UpdateReservationRequest;
+import com.queuetable.shared.event.QueueRecalculationEvent;
 import com.queuetable.shared.exception.BadRequestException;
 import com.queuetable.shared.exception.ForbiddenException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
 import com.queuetable.shared.websocket.EventPublisher;
+import org.springframework.context.ApplicationEventPublisher;
 import com.queuetable.table.domain.RestaurantTable;
 import com.queuetable.table.domain.TableRepository;
 import com.queuetable.table.dto.TableResponse;
@@ -28,13 +30,16 @@ public class ReservationService {
     private final ReservationRepository reservationRepository;
     private final TableRepository tableRepository;
     private final EventPublisher eventPublisher;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public ReservationService(ReservationRepository reservationRepository,
                               TableRepository tableRepository,
-                              EventPublisher eventPublisher) {
+                              EventPublisher eventPublisher,
+                              ApplicationEventPublisher applicationEventPublisher) {
         this.reservationRepository = reservationRepository;
         this.tableRepository = tableRepository;
         this.eventPublisher = eventPublisher;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -150,7 +155,9 @@ public class ReservationService {
     public ReservationResponse cancel(UUID reservationId) {
         Reservation reservation = findAndValidateOwnership(reservationId);
         transition(reservation, ReservationStatus.CANCELLED);
-        return saveAndPublish(reservation);
+        ReservationResponse response = saveAndPublish(reservation);
+        applicationEventPublisher.publishEvent(new QueueRecalculationEvent(reservation.getRestaurantId()));
+        return response;
     }
 
     private ReservationResponse saveAndPublish(Reservation reservation) {

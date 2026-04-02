@@ -2,10 +2,12 @@ package com.queuetable.queue.dto;
 
 import com.queuetable.queue.domain.QueueEntry;
 import com.queuetable.queue.domain.QueueEntryStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
 import java.util.UUID;
 
+@Schema(description = "Entrada en la cola (vista staff)")
 public record QueueEntryResponse(
         UUID id,
         UUID restaurantId,

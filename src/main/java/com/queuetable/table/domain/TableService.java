@@ -5,10 +5,12 @@ import com.queuetable.config.domain.RestaurantConfigRepository;
 import com.queuetable.reservation.domain.Reservation;
 import com.queuetable.reservation.domain.ReservationRepository;
 import com.queuetable.reservation.domain.ReservationStatus;
+import com.queuetable.shared.event.QueueRecalculationEvent;
 import com.queuetable.shared.exception.BadRequestException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
 import com.queuetable.shared.websocket.EventPublisher;
+import org.springframework.context.ApplicationEventPublisher;
 import com.queuetable.table.dto.CreateTableRequest;
 import com.queuetable.table.dto.TableResponse;
 import com.queuetable.table.dto.UpdateTableRequest;
@@ -29,15 +31,18 @@ public class TableService {
     private final ReservationRepository reservationRepository;
     private final RestaurantConfigRepository configRepository;
     private final EventPublisher eventPublisher;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public TableService(TableRepository tableRepository,
                         ReservationRepository reservationRepository,
                         RestaurantConfigRepository configRepository,
-                        EventPublisher eventPublisher) {
+                        EventPublisher eventPublisher,
+                        ApplicationEventPublisher applicationEventPublisher) {
         this.tableRepository = tableRepository;
         this.reservationRepository = reservationRepository;
         this.configRepository = configRepository;
         this.eventPublisher = eventPublisher;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -125,6 +130,11 @@ public class TableService {
         table.setStatus(newStatus);
         RestaurantTable saved = tableRepository.save(table);
         eventPublisher.publishTableUpdated(saved.getRestaurantId(), TableResponse.from(saved));
+
+        if (newStatus == TableStatus.FREE) {
+            applicationEventPublisher.publishEvent(new QueueRecalculationEvent(saved.getRestaurantId()));
+        }
+
         return saved;
     }
 

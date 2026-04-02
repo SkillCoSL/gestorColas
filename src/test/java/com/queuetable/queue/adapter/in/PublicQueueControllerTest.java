@@ -284,4 +284,47 @@ class PublicQueueControllerTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.position").value(2));
     }
+
+    // -------------------------------------------------------------------------
+    // POST /public/queue/{entryId}/confirm
+    // -------------------------------------------------------------------------
+
+    @Test
+    void confirmEntry_afterNotify_success() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+
+        MvcResult joinResult = joinQueue(slug, "Confirmer", 2);
+        String body = joinResult.getResponse().getContentAsString();
+        String entryId = JsonPath.read(body, "$.entryId");
+        String accessToken = JsonPath.read(body, "$.accessToken");
+
+        // Staff notifies
+        mockMvc.perform(post("/restaurants/{rid}/queue/{eid}/notify", auth.restaurantId(), entryId)
+                        .header("Authorization", "Bearer " + auth.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("NOTIFIED"));
+
+        // Client confirms
+        mockMvc.perform(post("/public/queue/{entryId}/confirm", entryId)
+                        .param("accessToken", accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("NOTIFIED"));
+    }
+
+    @Test
+    void confirmEntry_notNotified_returns400() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+
+        MvcResult joinResult = joinQueue(slug, "TooEarly", 2);
+        String body = joinResult.getResponse().getContentAsString();
+        String entryId = JsonPath.read(body, "$.entryId");
+        String accessToken = JsonPath.read(body, "$.accessToken");
+
+        // Client tries to confirm while still WAITING
+        mockMvc.perform(post("/public/queue/{entryId}/confirm", entryId)
+                        .param("accessToken", accessToken))
+                .andExpect(status().isBadRequest());
+    }
 }
