@@ -14,6 +14,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import com.queuetable.table.dto.CreateTableRequest;
 import com.queuetable.table.dto.TableResponse;
 import com.queuetable.table.dto.UpdateTableRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +28,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class TableService {
+
+    private static final Logger log = LoggerFactory.getLogger(TableService.class);
 
     private final TableRepository tableRepository;
     private final ReservationRepository reservationRepository;
@@ -127,8 +131,13 @@ public class TableService {
                     "Invalid transition: " + table.getStatus() + " → " + newStatus);
         }
 
+        TableStatus fromStatus = table.getStatus();
         table.setStatus(newStatus);
         RestaurantTable saved = tableRepository.save(table);
+
+        log.info("action=table_status_change tableId={} restaurantId={} from={} to={} label={}",
+                saved.getId(), saved.getRestaurantId(), fromStatus, newStatus, saved.getLabel());
+
         eventPublisher.publishTableUpdated(saved.getRestaurantId(), TableResponse.from(saved));
 
         if (newStatus == TableStatus.FREE) {

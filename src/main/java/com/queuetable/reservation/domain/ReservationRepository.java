@@ -19,4 +19,6 @@ public interface ReservationRepository extends JpaRepository<Reservation, UUID> 
             UUID restaurantId, ReservationStatus status, Instant from, Instant to);
 
     List<Reservation> findByTableIdAndStatusIn(UUID tableId, List<ReservationStatus> statuses);
+
+    List<Reservation> findByStatusAndReservedAtBefore(ReservationStatus status, Instant cutoff);
 }

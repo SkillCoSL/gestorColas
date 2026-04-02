@@ -2,10 +2,12 @@ package com.queuetable.reservation.dto;
 
 import com.queuetable.reservation.domain.Reservation;
 import com.queuetable.reservation.domain.ReservationStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
 import java.util.UUID;
 
+@Schema(description = "Datos de una reserva")
 public record ReservationResponse(
         UUID id,
         UUID restaurantId,

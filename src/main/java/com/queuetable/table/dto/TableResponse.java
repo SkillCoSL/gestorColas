@@ -2,9 +2,11 @@ package com.queuetable.table.dto;
 
 import com.queuetable.table.domain.RestaurantTable;
 import com.queuetable.table.domain.TableStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.UUID;
 
+@Schema(description = "Datos de una mesa del restaurante")
 public record TableResponse(
         UUID id,
         UUID restaurantId,

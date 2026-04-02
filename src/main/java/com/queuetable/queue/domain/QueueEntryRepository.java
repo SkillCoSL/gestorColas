@@ -3,6 +3,7 @@ package com.queuetable.queue.domain;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,4 +23,6 @@ public interface QueueEntryRepository extends JpaRepository<QueueEntry, UUID> {
     int findMaxPosition(UUID restaurantId);
 
     List<QueueEntry> findByRestaurantIdAndStatusInOrderByPositionAsc(UUID restaurantId, List<QueueEntryStatus> statuses);
+
+    List<QueueEntry> findByStatusAndNotifiedAtBefore(QueueEntryStatus status, Instant cutoff);
 }

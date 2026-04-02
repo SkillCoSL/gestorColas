@@ -10,6 +10,8 @@ import com.queuetable.shared.exception.ForbiddenException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
 import com.queuetable.shared.websocket.EventPublisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import com.queuetable.table.domain.RestaurantTable;
 import com.queuetable.table.domain.TableRepository;
@@ -26,6 +28,8 @@ import java.util.UUID;
 
 @Service
 public class ReservationService {
+
+    private static final Logger log = LoggerFactory.getLogger(ReservationService.class);
 
     private final ReservationRepository reservationRepository;
     private final TableRepository tableRepository;
@@ -171,7 +175,11 @@ public class ReservationService {
             throw new BadRequestException(
                     "Invalid transition: " + reservation.getStatus() + " → " + target);
         }
+        ReservationStatus from = reservation.getStatus();
         reservation.setStatus(target);
+
+        log.info("action=reservation_transition reservationId={} restaurantId={} from={} to={} customer={}",
+                reservation.getId(), reservation.getRestaurantId(), from, target, reservation.getCustomerName());
     }
 
     private Reservation findAndValidateOwnership(UUID reservationId) {

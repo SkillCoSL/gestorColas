@@ -1,10 +1,12 @@
 package com.queuetable.restaurant.dto;
 
 import com.queuetable.restaurant.domain.Restaurant;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+@Schema(description = "Datos completos del restaurante")
 public record RestaurantResponse(
         UUID id,
         String name,

@@ -11,6 +11,8 @@ import com.queuetable.shared.exception.ForbiddenException;
 import com.queuetable.shared.exception.ResourceNotFoundException;
 import com.queuetable.shared.security.SecurityContextUtil;
 import com.queuetable.shared.websocket.EventPublisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import com.queuetable.table.domain.RestaurantTable;
 import com.queuetable.table.domain.TableRepository;
@@ -25,6 +27,8 @@ import java.util.UUID;
 
 @Service
 public class QueueService {
+
+    private static final Logger log = LoggerFactory.getLogger(QueueService.class);
 
     private final QueueEntryRepository queueEntryRepository;
     private final RestaurantRepository restaurantRepository;
@@ -91,6 +95,9 @@ public class QueueService {
         entry.setEstimatedWaitMinutes(estimatedWait);
 
         entry = queueEntryRepository.save(entry);
+
+        log.info("action=queue_join entryId={} restaurantId={} customer={} partySize={} position={}",
+                entry.getId(), restaurant.getId(), entry.getCustomerName(), entry.getPartySize(), entry.getPosition());
 
         eventPublisher.publishQueueUpdated(restaurant.getId(), QueueEntryResponse.from(entry));
 
@@ -210,6 +217,9 @@ public class QueueService {
         entry.setNotifiedAt(Instant.now());
         QueueEntry saved = queueEntryRepository.save(entry);
 
+        log.info("action=queue_notify entryId={} restaurantId={} customer={}",
+                saved.getId(), restaurantId, saved.getCustomerName());
+
         eventPublisher.publishQueueUpdated(restaurantId, QueueEntryResponse.from(saved));
         queueSseService.notifyEntry(saved.getId(), PublicQueueEntryResponse.from(saved));
 
@@ -277,6 +287,10 @@ public class QueueService {
         }
         entry.setStatus(QueueEntryStatus.CANCELLED);
         queueEntryRepository.save(entry);
+
+        log.info("action=queue_cancel entryId={} restaurantId={} customer={}",
+                entry.getId(), entry.getRestaurantId(), entry.getCustomerName());
+
         recalculatePositions(entry.getRestaurantId());
         eventPublisher.publishQueueUpdated(entry.getRestaurantId(), QueueEntryResponse.from(entry));
         queueSseService.notifyEntry(entry.getId(), PublicQueueEntryResponse.from(entry));
