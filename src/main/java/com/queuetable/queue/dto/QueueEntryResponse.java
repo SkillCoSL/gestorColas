@@ -11,6 +11,7 @@ import java.util.UUID;
 public record QueueEntryResponse(
         UUID id,
         UUID restaurantId,
+        UUID tableId,
         String customerName,
         String customerPhone,
         int partySize,
@@ -24,7 +25,7 @@ public record QueueEntryResponse(
 ) {
     public static QueueEntryResponse from(QueueEntry e) {
         return new QueueEntryResponse(
-                e.getId(), e.getRestaurantId(),
+                e.getId(), e.getRestaurantId(), e.getTableId(),
                 e.getCustomerName(), e.getCustomerPhone(),
                 e.getPartySize(), e.getPosition(),
                 e.getStatus(), e.getEstimatedWaitMinutes(),
