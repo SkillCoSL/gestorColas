@@ -140,7 +140,7 @@ class EdgeCasesTest extends AbstractIntegrationTest {
                         .header("Authorization", bearer(auth))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RestaurantConfigUpdateRequest(null, null, null, null, 2))))
+                                new RestaurantConfigUpdateRequest(null, null, null, null, 2, null, null))))
                 .andExpect(status().isOk());
 
         // Join 1 and 2 → OK
@@ -166,7 +166,7 @@ class EdgeCasesTest extends AbstractIntegrationTest {
                         .header("Authorization", bearer(auth))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RestaurantConfigUpdateRequest(null, null, null, null, 1))))
+                                new RestaurantConfigUpdateRequest(null, null, null, null, 1, null, null))))
                 .andExpect(status().isOk());
 
         // Join 1 → OK

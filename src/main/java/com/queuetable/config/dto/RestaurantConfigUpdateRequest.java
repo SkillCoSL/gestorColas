@@ -9,5 +9,7 @@ public record RestaurantConfigUpdateRequest(
         @Schema(description = "Gracia antes de marcar no-show", example = "15") @Min(1) Integer noshowGraceMinutes,
         @Schema(description = "Duracion promedio de una mesa", example = "60") @Min(1) Integer avgTableDurationMinutes,
         @Schema(description = "Ventana de proteccion de reserva", example = "30") @Min(1) Integer reservationProtectionWindowMinutes,
-        @Schema(description = "Tamanio maximo de la cola (null = sin limite)", example = "50") @Min(1) Integer maxQueueSize
+        @Schema(description = "Tamanio maximo de la cola (null = sin limite)", example = "50") @Min(1) Integer maxQueueSize,
+        @Schema(description = "Duracion de limpieza tras una mesa liberada", example = "5") @Min(0) Integer cleaningDurationMinutes,
+        @Schema(description = "Piso de minutos para una mesa cuando elapsed > avg", example = "3") @Min(0) Integer waitBufferMinutes
 ) {}

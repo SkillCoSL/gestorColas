@@ -34,6 +34,12 @@ public class RestaurantConfig {
     @Column(name = "max_queue_size")
     private Integer maxQueueSize;
 
+    @Column(name = "cleaning_duration_minutes", nullable = false)
+    private int cleaningDurationMinutes = 5;
+
+    @Column(name = "wait_buffer_minutes", nullable = false)
+    private int waitBufferMinutes = 3;
+
     protected RestaurantConfig() {}
 
     public static RestaurantConfig createDefault(UUID restaurantId) {
@@ -54,4 +60,8 @@ public class RestaurantConfig {
     public void setReservationProtectionWindowMinutes(int value) { this.reservationProtectionWindowMinutes = value; }
     public Integer getMaxQueueSize() { return maxQueueSize; }
     public void setMaxQueueSize(Integer value) { this.maxQueueSize = value; }
+    public int getCleaningDurationMinutes() { return cleaningDurationMinutes; }
+    public void setCleaningDurationMinutes(int value) { this.cleaningDurationMinutes = value; }
+    public int getWaitBufferMinutes() { return waitBufferMinutes; }
+    public void setWaitBufferMinutes(int value) { this.waitBufferMinutes = value; }
 }

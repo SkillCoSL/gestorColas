@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import com.queuetable.table.domain.RestaurantTable;
 import com.queuetable.table.domain.TableRepository;
+import com.queuetable.table.domain.TableService;
 import com.queuetable.table.domain.TableStatus;
 import com.queuetable.table.dto.TableResponse;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -34,21 +36,27 @@ public class QueueService {
     private final RestaurantRepository restaurantRepository;
     private final RestaurantConfigRepository configRepository;
     private final TableRepository tableRepository;
+    private final TableService tableService;
     private final EventPublisher eventPublisher;
     private final QueueSseService queueSseService;
+    private final WaitTimeEstimator waitTimeEstimator;
 
     public QueueService(QueueEntryRepository queueEntryRepository,
                         RestaurantRepository restaurantRepository,
                         RestaurantConfigRepository configRepository,
                         TableRepository tableRepository,
+                        TableService tableService,
                         EventPublisher eventPublisher,
-                        QueueSseService queueSseService) {
+                        QueueSseService queueSseService,
+                        WaitTimeEstimator waitTimeEstimator) {
         this.queueEntryRepository = queueEntryRepository;
         this.restaurantRepository = restaurantRepository;
         this.configRepository = configRepository;
         this.tableRepository = tableRepository;
+        this.tableService = tableService;
         this.eventPublisher = eventPublisher;
         this.queueSseService = queueSseService;
+        this.waitTimeEstimator = waitTimeEstimator;
     }
 
     @Transactional(readOnly = true)
@@ -58,13 +66,19 @@ public class QueueService {
     }
 
     @Transactional(readOnly = true)
-    public QueueStatusResponse getQueueStatus(String slug) {
+    public QueueStatusResponse getQueueStatus(String slug, Integer partySize) {
         Restaurant restaurant = findActiveRestaurantBySlug(slug);
         RestaurantConfig config = getConfig(restaurant.getId());
 
         int waitingCount = queueEntryRepository.countWaiting(restaurant.getId());
-        int estimatedWait = waitingCount * config.getAvgTableDurationMinutes();
         boolean queueOpen = config.getMaxQueueSize() == null || waitingCount < config.getMaxQueueSize();
+
+        Integer estimatedWait = null;
+        if (partySize != null && partySize >= 1) {
+            List<QueueEntry> active = activeAheadEntries(restaurant.getId());
+            int competitors = countCompetitorsAhead(active, partySize);
+            estimatedWait = estimateForPartySize(restaurant.getId(), partySize, competitors, config);
+        }
 
         return new QueueStatusResponse(waitingCount, estimatedWait, queueOpen);
     }
@@ -91,7 +105,9 @@ public class QueueService {
             entry.setCustomerPhone(request.customerPhone());
         }
 
-        int estimatedWait = waitingCount * config.getAvgTableDurationMinutes();
+        List<QueueEntry> aheadEntries = activeAheadEntries(restaurant.getId());
+        int competitors = countCompetitorsAhead(aheadEntries, request.partySize());
+        Integer estimatedWait = estimateForPartySize(restaurant.getId(), request.partySize(), competitors, config);
         entry.setEstimatedWaitMinutes(estimatedWait);
 
         entry = queueEntryRepository.save(entry);
@@ -168,6 +184,8 @@ public class QueueService {
         entry.setStatus(QueueEntryStatus.SEATED);
         entry.setTableId(table.getId());
         table.setStatus(TableStatus.OCCUPIED);
+        table.setOccupiedAt(Instant.now());
+        table.setCleaningStartedAt(null);
 
         tableRepository.save(table);
         QueueEntry saved = queueEntryRepository.save(entry);
@@ -193,7 +211,11 @@ public class QueueService {
         if (request.customerPhone() != null) {
             entry.setCustomerPhone(request.customerPhone());
         }
-        entry.setEstimatedWaitMinutes(waitingCount * config.getAvgTableDurationMinutes());
+
+        List<QueueEntry> aheadEntries = activeAheadEntries(restaurantId);
+        int competitors = countCompetitorsAhead(aheadEntries, request.partySize());
+        Integer estimatedWait = estimateForPartySize(restaurantId, request.partySize(), competitors, config);
+        entry.setEstimatedWaitMinutes(estimatedWait);
 
         entry = queueEntryRepository.save(entry);
         eventPublisher.publishQueueUpdated(restaurantId, QueueEntryResponse.from(entry));
@@ -297,10 +319,16 @@ public class QueueService {
         List<QueueEntry> activeEntries = queueEntryRepository
                 .findByRestaurantIdAndStatusOrderByPositionAsc(restaurantId, QueueEntryStatus.WAITING);
 
+        EstimationContext ctx = loadEstimationContext(restaurantId, config);
+
         int pos = 1;
         for (QueueEntry e : activeEntries) {
             e.setPosition(pos);
-            e.setEstimatedWaitMinutes((pos - 1) * config.getAvgTableDurationMinutes());
+            int competitors = 0;
+            for (int i = 0; i < pos - 1; i++) {
+                if (activeEntries.get(i).getPartySize() >= e.getPartySize()) competitors++;
+            }
+            e.setEstimatedWaitMinutes(estimate(e.getPartySize(), competitors, ctx));
             pos++;
         }
         queueEntryRepository.saveAll(activeEntries);
@@ -315,15 +343,53 @@ public class QueueService {
                 .findByRestaurantIdAndStatusOrderByPositionAsc(entry.getRestaurantId(), QueueEntryStatus.WAITING);
 
         int pos = 1;
+        int competitors = 0;
         for (QueueEntry e : waitingEntries) {
             if (e.getId().equals(entry.getId())) {
+                EstimationContext ctx = loadEstimationContext(entry.getRestaurantId(), config);
                 entry.setPosition(pos);
-                entry.setEstimatedWaitMinutes((pos - 1) * config.getAvgTableDurationMinutes());
-                break;
+                entry.setEstimatedWaitMinutes(estimate(entry.getPartySize(), competitors, ctx));
+                return;
             }
+            if (e.getPartySize() >= entry.getPartySize()) competitors++;
             pos++;
         }
     }
+
+    private List<QueueEntry> activeAheadEntries(UUID restaurantId) {
+        return queueEntryRepository.findByRestaurantIdAndStatusInOrderByPositionAsc(
+                restaurantId,
+                List.of(QueueEntryStatus.WAITING, QueueEntryStatus.NOTIFIED)
+        );
+    }
+
+    private int countCompetitorsAhead(List<QueueEntry> aheadEntries, int partySize) {
+        int count = 0;
+        for (QueueEntry e : aheadEntries) {
+            if (e.getPartySize() >= partySize) count++;
+        }
+        return count;
+    }
+
+    private Integer estimateForPartySize(UUID restaurantId, int partySize, int competitors, RestaurantConfig config) {
+        EstimationContext ctx = loadEstimationContext(restaurantId, config);
+        return estimate(partySize, competitors, ctx);
+    }
+
+    private Integer estimate(int partySize, int competitors, EstimationContext ctx) {
+        return waitTimeEstimator.estimate(partySize, competitors, ctx.tables(), ctx.protectedTableIds(), ctx.config(), ctx.now());
+    }
+
+    private EstimationContext loadEstimationContext(UUID restaurantId, RestaurantConfig config) {
+        List<RestaurantTable> tables = tableRepository.findByRestaurantIdOrderByLabelAsc(restaurantId);
+        Set<UUID> protectedIds = tableService.getProtectedReservedTableIds(restaurantId);
+        return new EstimationContext(tables, protectedIds, config, Instant.now());
+    }
+
+    private record EstimationContext(List<RestaurantTable> tables,
+                                     Set<UUID> protectedTableIds,
+                                     RestaurantConfig config,
+                                     Instant now) {}
 
     private Restaurant findActiveRestaurantBySlug(String slug) {
         Restaurant restaurant = restaurantRepository.findBySlug(slug)

@@ -4,6 +4,7 @@ import com.jayway.jsonpath.JsonPath;
 import com.queuetable.auth.dto.AuthResponse;
 import com.queuetable.shared.AbstractIntegrationTest;
 import com.queuetable.queue.dto.JoinQueueRequest;
+import com.queuetable.table.dto.CreateTableRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
@@ -34,6 +35,15 @@ class PublicQueueControllerTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andReturn();
+    }
+
+    private void createTable(AuthResponse auth, String label, int capacity) throws Exception {
+        var request = new CreateTableRequest(label, capacity, null);
+        mockMvc.perform(post("/restaurants/{id}/tables", auth.restaurantId())
+                        .header("Authorization", "Bearer " + auth.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
     }
 
     // -------------------------------------------------------------------------
@@ -70,7 +80,7 @@ class PublicQueueControllerTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/public/restaurants/{slug}/queue/status", slug))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.waitingCount").value(0))
-                .andExpect(jsonPath("$.estimatedWaitMinutes").value(0))
+                .andExpect(jsonPath("$.estimatedWaitMinutes").isEmpty())
                 .andExpect(jsonPath("$.queueOpen").value(true));
     }
 
@@ -86,6 +96,54 @@ class PublicQueueControllerTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.waitingCount").value(2))
                 .andExpect(jsonPath("$.queueOpen").value(true));
+    }
+
+    @Test
+    void getQueueStatus_withPartySize_usesEstimator() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+        createTable(auth, "T1", 4);
+
+        mockMvc.perform(get("/public/restaurants/{slug}/queue/status", slug)
+                        .param("partySize", "4"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estimatedWaitMinutes").value(0));
+    }
+
+    @Test
+    void getQueueStatus_withPartySizeBiggerThanAnyTable_returnsNullEstimate() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+        createTable(auth, "T1", 2);
+        createTable(auth, "T2", 2);
+
+        mockMvc.perform(get("/public/restaurants/{slug}/queue/status", slug)
+                        .param("partySize", "8"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estimatedWaitMinutes").isEmpty());
+    }
+
+    @Test
+    void joinQueue_estimateConsidersOnlyTablesThatFitGroup() throws Exception {
+        AuthResponse auth = freshRestaurant();
+        String slug = slugOf(auth);
+        createTable(auth, "Small1", 2);
+        createTable(auth, "Small2", 2);
+        createTable(auth, "Big", 6);
+
+        // A party of 6 has only one suitable table; it is free → estimate 0
+        mockMvc.perform(post("/public/restaurants/{slug}/queue", slug)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new JoinQueueRequest("Big group", 6, null))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.estimatedWaitMinutes").value(0));
+
+        // A party of 2 also gets 0 (small tables are free)
+        mockMvc.perform(post("/public/restaurants/{slug}/queue", slug)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new JoinQueueRequest("Small group", 2, null))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.estimatedWaitMinutes").value(0));
     }
 
     // -------------------------------------------------------------------------
@@ -106,7 +164,7 @@ class PublicQueueControllerTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.entryId").isNotEmpty())
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.position").value(1))
-                .andExpect(jsonPath("$.estimatedWaitMinutes").value(0));
+                .andExpect(jsonPath("$.estimatedWaitMinutes").isEmpty());
     }
 
     @Test

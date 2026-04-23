@@ -12,14 +12,17 @@ public record RestaurantConfigResponse(
         int noshowGraceMinutes,
         int avgTableDurationMinutes,
         int reservationProtectionWindowMinutes,
-        Integer maxQueueSize
+        Integer maxQueueSize,
+        int cleaningDurationMinutes,
+        int waitBufferMinutes
 ) {
     public static RestaurantConfigResponse from(RestaurantConfig c) {
         return new RestaurantConfigResponse(
                 c.getId(), c.getRestaurantId(),
                 c.getConfirmationTimeoutMinutes(), c.getNoshowGraceMinutes(),
                 c.getAvgTableDurationMinutes(), c.getReservationProtectionWindowMinutes(),
-                c.getMaxQueueSize()
+                c.getMaxQueueSize(),
+                c.getCleaningDurationMinutes(), c.getWaitBufferMinutes()
         );
     }
 }

@@ -165,9 +165,12 @@ public class ReservationService {
 
         reservation.setTableId(table.getId());
         table.setStatus(TableStatus.OCCUPIED);
+        table.setOccupiedAt(Instant.now());
+        table.setCleaningStartedAt(null);
 
         tableRepository.save(table);
         eventPublisher.publishTableUpdated(reservation.getRestaurantId(), TableResponse.from(table));
+        applicationEventPublisher.publishEvent(new QueueRecalculationEvent(reservation.getRestaurantId()));
         return saveAndPublish(reservation);
     }
 
@@ -189,6 +192,8 @@ public class ReservationService {
                     .orElse(null);
             if (table != null && table.getStatus() == TableStatus.OCCUPIED) {
                 table.setStatus(TableStatus.CLEANING);
+                table.setCleaningStartedAt(Instant.now());
+                table.setOccupiedAt(null);
                 tableRepository.save(table);
                 eventPublisher.publishTableUpdated(reservation.getRestaurantId(), TableResponse.from(table));
             }

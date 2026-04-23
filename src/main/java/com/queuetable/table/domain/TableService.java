@@ -79,7 +79,8 @@ public class TableService {
                 .toList();
     }
 
-    private Set<UUID> getProtectedReservedTableIds(UUID restaurantId) {
+    @Transactional(readOnly = true)
+    public Set<UUID> getProtectedReservedTableIds(UUID restaurantId) {
         RestaurantConfig config = configRepository.findByRestaurantId(restaurantId).orElse(null);
         if (config == null) return Set.of();
 
@@ -198,17 +199,29 @@ public class TableService {
         }
 
         TableStatus fromStatus = table.getStatus();
+        Instant now = Instant.now();
         table.setStatus(newStatus);
+        switch (newStatus) {
+            case OCCUPIED -> {
+                table.setOccupiedAt(now);
+                table.setCleaningStartedAt(null);
+            }
+            case CLEANING -> {
+                table.setCleaningStartedAt(now);
+                table.setOccupiedAt(null);
+            }
+            case FREE -> {
+                table.setOccupiedAt(null);
+                table.setCleaningStartedAt(null);
+            }
+        }
         RestaurantTable saved = tableRepository.save(table);
 
         log.info("action=table_status_change tableId={} restaurantId={} from={} to={} label={}",
                 saved.getId(), saved.getRestaurantId(), fromStatus, newStatus, saved.getLabel());
 
         eventPublisher.publishTableUpdated(saved.getRestaurantId(), TableResponse.from(saved));
-
-        if (newStatus == TableStatus.FREE) {
-            applicationEventPublisher.publishEvent(new QueueRecalculationEvent(saved.getRestaurantId()));
-        }
+        applicationEventPublisher.publishEvent(new QueueRecalculationEvent(saved.getRestaurantId()));
 
         return saved;
     }

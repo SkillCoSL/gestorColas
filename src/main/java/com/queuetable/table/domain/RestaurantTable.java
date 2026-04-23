@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
@@ -35,6 +36,12 @@ public class RestaurantTable extends AuditableEntity {
     @Column(length = 100)
     private String zone;
 
+    @Column(name = "occupied_at")
+    private Instant occupiedAt;
+
+    @Column(name = "cleaning_started_at")
+    private Instant cleaningStartedAt;
+
     protected RestaurantTable() {}
 
     public RestaurantTable(UUID restaurantId, String label, int capacity) {
@@ -53,4 +60,8 @@ public class RestaurantTable extends AuditableEntity {
     public void setStatus(TableStatus status) { this.status = status; }
     public String getZone() { return zone; }
     public void setZone(String zone) { this.zone = zone; }
+    public Instant getOccupiedAt() { return occupiedAt; }
+    public void setOccupiedAt(Instant occupiedAt) { this.occupiedAt = occupiedAt; }
+    public Instant getCleaningStartedAt() { return cleaningStartedAt; }
+    public void setCleaningStartedAt(Instant cleaningStartedAt) { this.cleaningStartedAt = cleaningStartedAt; }
 }

@@ -33,10 +33,14 @@ public class PublicQueueController {
     }
 
     @GetMapping("/restaurants/{slug}/queue/status")
-    @Operation(summary = "Estado actual de la cola", description = "Cuantas personas esperan y tiempo estimado")
+    @Operation(summary = "Estado actual de la cola",
+               description = "Cuantas personas esperan y tiempo estimado para el partySize indicado")
     @ApiResponse(responseCode = "200", description = "Estado de la cola")
-    public ResponseEntity<QueueStatusResponse> getQueueStatus(@PathVariable String slug) {
-        return ResponseEntity.ok(queueService.getQueueStatus(slug));
+    public ResponseEntity<QueueStatusResponse> getQueueStatus(
+            @PathVariable String slug,
+            @Parameter(description = "Tamano del grupo del cliente; si se omite, no se calcula tiempo estimado")
+            @RequestParam(required = false) Integer partySize) {
+        return ResponseEntity.ok(queueService.getQueueStatus(slug, partySize));
     }
 
     @PostMapping("/restaurants/{slug}/queue")

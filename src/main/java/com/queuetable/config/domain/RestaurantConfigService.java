@@ -39,6 +39,10 @@ public class RestaurantConfigService {
             config.setReservationProtectionWindowMinutes(request.reservationProtectionWindowMinutes());
         if (request.maxQueueSize() != null)
             config.setMaxQueueSize(request.maxQueueSize());
+        if (request.cleaningDurationMinutes() != null)
+            config.setCleaningDurationMinutes(request.cleaningDurationMinutes());
+        if (request.waitBufferMinutes() != null)
+            config.setWaitBufferMinutes(request.waitBufferMinutes());
 
         return configRepository.save(config);
     }

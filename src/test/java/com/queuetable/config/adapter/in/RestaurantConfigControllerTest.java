@@ -57,7 +57,7 @@ class RestaurantConfigControllerTest extends AbstractIntegrationTest {
     @Test
     void updateConfig_success() throws Exception {
         AuthResponse auth = freshRestaurant();
-        var update = new RestaurantConfigUpdateRequest(10, 20, 60, 45, 30);
+        var update = new RestaurantConfigUpdateRequest(10, 20, 60, 45, 30, null, null);
 
         mockMvc.perform(patch("/restaurants/{id}/config", auth.restaurantId())
                         .header("Authorization", bearer(auth))
@@ -74,7 +74,7 @@ class RestaurantConfigControllerTest extends AbstractIntegrationTest {
     @Test
     void updateConfig_partialFields() throws Exception {
         AuthResponse auth = freshRestaurant();
-        var update = new RestaurantConfigUpdateRequest(null, null, 90, null, null);
+        var update = new RestaurantConfigUpdateRequest(null, null, 90, null, null, null, null);
 
         mockMvc.perform(patch("/restaurants/{id}/config", auth.restaurantId())
                         .header("Authorization", bearer(auth))
@@ -90,7 +90,7 @@ class RestaurantConfigControllerTest extends AbstractIntegrationTest {
     void updateConfig_otherRestaurant_returns403() throws Exception {
         AuthResponse owner = freshRestaurant();
         AuthResponse intruder = freshRestaurant();
-        var update = new RestaurantConfigUpdateRequest(99, null, null, null, null);
+        var update = new RestaurantConfigUpdateRequest(99, null, null, null, null, null, null);
 
         mockMvc.perform(patch("/restaurants/{id}/config", owner.restaurantId())
                         .header("Authorization", bearer(intruder))
@@ -104,7 +104,7 @@ class RestaurantConfigControllerTest extends AbstractIntegrationTest {
         AuthResponse auth = freshRestaurant();
 
         // Set max queue size
-        var setMax = new RestaurantConfigUpdateRequest(null, null, null, null, 50);
+        var setMax = new RestaurantConfigUpdateRequest(null, null, null, null, 50, null, null);
         mockMvc.perform(patch("/restaurants/{id}/config", auth.restaurantId())
                         .header("Authorization", bearer(auth))
                         .contentType(MediaType.APPLICATION_JSON)
